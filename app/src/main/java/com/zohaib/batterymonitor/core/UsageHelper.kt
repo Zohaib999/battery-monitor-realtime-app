@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
 import com.zohaib.batterymonitor.data.PKG_SCREEN_OFF
+import com.zohaib.batterymonitor.data.PKG_SCREEN_ON_OTHER
 import java.util.Calendar
 import java.util.concurrent.ConcurrentHashMap
 
@@ -77,6 +78,36 @@ object UsageHelper {
         return out
     }
 
+    /**
+     * Milliseconds the screen was on inside [start, end], from Android's screen on/off events.
+     * Null when the phone reports no such events (older Android), so callers can fall back.
+     */
+    fun screenOnTime(context: Context, start: Long, end: Long): Long? {
+        if (!hasUsageAccess(context) || end <= start) return null
+        val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val events = usm.queryEvents(start - 6 * 3_600_000L, end)
+        val e = UsageEvents.Event()
+        var on: Boolean? = null
+        var since = start
+        var total = 0L
+        var seen = false
+        while (events.hasNextEvent()) {
+            events.getNextEvent(e)
+            val type = e.eventType
+            if (type != SCREEN_INTERACTIVE && type != SCREEN_NON_INTERACTIVE) continue
+            seen = true
+            val t = e.timeStamp.coerceIn(start, end)
+            // The first event tells us the state before it: turning off means it was on.
+            if (on == null) on = type == SCREEN_NON_INTERACTIVE
+            if (on == true) total += t - since
+            on = type == SCREEN_INTERACTIVE
+            since = t
+        }
+        if (!seen) return null
+        if (on == true) total += end - since
+        return total.coerceIn(0, end - start)
+    }
+
     /** Foreground time per app since [since], most used first. */
     fun screenTime(context: Context, since: Long): List<AppTime> {
         if (!hasUsageAccess(context)) return emptyList()
@@ -125,7 +156,8 @@ object UsageHelper {
     private val icons = ConcurrentHashMap<String, ImageBitmap>()
 
     fun label(context: Context, pkg: String): String {
-        if (pkg == PKG_SCREEN_OFF) return "Screen off / idle"
+        if (pkg == PKG_SCREEN_OFF) return "Screen off"
+        if (pkg == PKG_SCREEN_ON_OTHER) return "Screen on · home / lock / shade"
         return labels.getOrPut(pkg) {
             try {
                 val pm = context.packageManager
@@ -137,7 +169,7 @@ object UsageHelper {
     }
 
     fun icon(context: Context, pkg: String): ImageBitmap? {
-        if (pkg == PKG_SCREEN_OFF) return null
+        if (pkg == PKG_SCREEN_OFF || pkg == PKG_SCREEN_ON_OTHER) return null
         icons[pkg]?.let { return it }
         return try {
             val bmp = context.packageManager.getApplicationIcon(pkg).toBitmap(96, 96).asImageBitmap()

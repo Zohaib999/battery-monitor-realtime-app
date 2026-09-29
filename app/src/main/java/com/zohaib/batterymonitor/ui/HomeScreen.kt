@@ -148,7 +148,7 @@ fun HomeScreen(onOpenSessions: (String) -> Unit, onOpenApps: () -> Unit, onOpenS
             SectionTitle("Top 5 apps using battery today", Modifier.weight(1f))
             TextButton(onClick = onOpenApps) { Text("All") }
         }
-        val topDrain = drain.filter { it.pkg != PKG_SCREEN_OFF }.take(5)
+        val topDrain = drain.filter { it.pkg != PKG_SCREEN_OFF && it.pkg != com.zohaib.batterymonitor.data.PKG_SCREEN_ON_OTHER }.take(5)
         if (topDrain.isEmpty()) {
             Hint(if (hasUsage) "Nothing yet. Data appears after the battery drops by 1% while you use the phone." else "Needs usage access.")
         } else {

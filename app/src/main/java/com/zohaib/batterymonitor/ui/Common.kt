@@ -47,6 +47,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.zohaib.batterymonitor.core.UsageHelper
 import com.zohaib.batterymonitor.data.PKG_SCREEN_OFF
+import com.zohaib.batterymonitor.data.PKG_SCREEN_ON_OTHER
+import androidx.compose.material.icons.outlined.PhoneAndroid
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -203,7 +205,11 @@ fun AppIcon(pkg: String, size: Int = 36) {
     } else {
         Box(mod.background(MaterialTheme.colorScheme.surfaceContainerHigh), contentAlignment = Alignment.Center) {
             Icon(
-                if (pkg == PKG_SCREEN_OFF) Icons.Outlined.NightsStay else Icons.Outlined.Android,
+                when (pkg) {
+                    PKG_SCREEN_OFF -> Icons.Outlined.NightsStay
+                    PKG_SCREEN_ON_OTHER -> Icons.Outlined.PhoneAndroid
+                    else -> Icons.Outlined.Android
+                },
                 contentDescription = null,
                 modifier = Modifier.size((size * 0.6).dp),
             )
@@ -219,7 +225,7 @@ fun AppRow(
     openInfo: Boolean = true,
 ) {
     val ctx = LocalContext.current
-    val tap = if (openInfo && pkg != PKG_SCREEN_OFF) Modifier.clickable { Perms.openAppInfo(ctx, pkg) } else Modifier
+    val tap = if (openInfo && pkg != PKG_SCREEN_OFF && pkg != PKG_SCREEN_ON_OTHER) Modifier.clickable { Perms.openAppInfo(ctx, pkg) } else Modifier
     Row(Modifier.fillMaxWidth().then(tap).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         AppIcon(pkg)
         Spacer(Modifier.width(12.dp))

@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.Flow
 const val TYPE_CHARGE = "charge"
 const val TYPE_DISCHARGE = "discharge"
 const val PKG_SCREEN_OFF = "screen_off"
+/** Screen on, but no app in front: home screen, lock screen, notification shade. */
+const val PKG_SCREEN_ON_OTHER = "screen_on_other"
 
 @Entity(tableName = "session")
 data class Session(
@@ -93,6 +95,9 @@ interface BatteryDao {
 
     @Query("SELECT * FROM step WHERE sessionId = :id ORDER BY ts")
     fun stepsFlow(id: Long): Flow<List<Step>>
+
+    @Query("SELECT a.* FROM step_app a JOIN step s ON a.stepId = s.id WHERE s.sessionId = :id")
+    fun stepAppsFlow(id: Long): Flow<List<StepApp>>
 
     @Query("SELECT * FROM estimate WHERE sessionId = :id ORDER BY madeAt")
     suspend fun estimates(id: Long): List<Estimate>

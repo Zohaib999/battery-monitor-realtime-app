@@ -26,6 +26,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -50,9 +51,11 @@ import com.zohaib.batterymonitor.data.Estimate
 import com.zohaib.batterymonitor.data.Session
 import com.zohaib.batterymonitor.data.Step
 import com.zohaib.batterymonitor.data.TYPE_CHARGE
+import com.zohaib.batterymonitor.data.PKG_SCREEN_OFF
 
 private val EstimateColors = listOf(Color(0xFF2563EB), Color(0xFF9333EA), Color(0xFFDB2777))
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionDetailScreen(id: Long, onBack: () -> Unit) {
     val dao = App.instance.db.dao()
@@ -60,6 +63,8 @@ fun SessionDetailScreen(id: Long, onBack: () -> Unit) {
     val steps by dao.stepsFlow(id).collectAsState(emptyList())
     val estimates by dao.estimatesFlow(id).collectAsState(emptyList())
     val apps by dao.appDrainForSession(id).collectAsState(emptyList())
+    val stepApps by dao.stepAppsFlow(id).collectAsState(emptyList())
+    var screenTab by rememberSaveable { mutableIntStateOf(0) }
     val live by App.instance.tracker.live.collectAsState()
     val s = session
     if (s == null) {
@@ -102,18 +107,54 @@ fun SessionDetailScreen(id: Long, onBack: () -> Unit) {
             SectionTitle("Estimate vs actual")
             EstimateTable(s, steps, estimates, if (s.end == null) live.etaAt else null)
 
-            if (!charge && apps.isNotEmpty()) {
-                SectionTitle("Apps in this session")
-                val max = apps.first().pct.coerceAtLeast(0.01)
-                apps.take(10).forEach {
+            if (!charge) {
+                SectionTitle("Battery use")
+                val tabs = listOf("All", "On screen", "Off screen")
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    tabs.forEachIndexed { i, t ->
+                        SegmentedButton(screenTab == i, { screenTab = i }, SegmentedButtonDefaults.itemShape(i, tabs.size)) { Text(t) }
+                    }
+                }
+                val shown = when (screenTab) {
+                    1 -> apps.filter { it.pkg != PKG_SCREEN_OFF }
+                    2 -> apps.filter { it.pkg == PKG_SCREEN_OFF }
+                    else -> apps
+                }
+                if (screenTab != 0) {
+                    val ms = shown.sumOf { it.ms }
+                    val pct = shown.sumOf { it.pct }
+                    val perHour = if (ms > 60_000) pct / (ms / 3_600_000.0) else null
+                    Text(
+                        "${if (screenTab == 1) "Screen on" else "Screen off"} for ${fmtDuration(ms)} · used %.1f%%".format(pct) +
+                            (perHour?.let { " · %.1f%%/hour".format(it) } ?: ""),
+                        style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 10.dp),
+                    )
+                }
+                if (shown.isEmpty()) Hint("No data for this view yet.")
+                val max = shown.maxOfOrNull { it.pct }?.coerceAtLeast(0.01) ?: 1.0
+                shown.take(10).forEach {
                     AppRow(
-                        it.pkg, UsageHelper.label(ctx, it.pkg), "${fmtDuration(it.ms)} on screen",
+                        it.pkg, UsageHelper.label(ctx, it.pkg), "${fmtDuration(it.ms)}",
                         "%.1f%%".format(it.pct), (it.pct / max).toFloat(), color,
                     )
                 }
             }
 
-            StepTable(s, steps)
+            val offByStep = remember(stepApps) { stepApps.filter { it.pkg == PKG_SCREEN_OFF }.groupBy { it.stepId }.mapValues { e -> e.value.sumOf { it.ms } } }
+            val tableSteps = when {
+                charge || screenTab == 0 -> steps
+                screenTab == 1 -> steps.filter { (offByStep[it.id] ?: 0L) * 2 < it.windowMs }
+                else -> steps.filter { (offByStep[it.id] ?: 0L) * 2 >= it.windowMs }
+            }
+            StepTable(
+                s, tableSteps,
+                note = when {
+                    charge || screenTab == 0 -> null
+                    screenTab == 1 -> "Only 1% steps where the screen was mostly on."
+                    else -> "Only 1% steps where the screen was mostly off."
+                },
+            )
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -278,8 +319,9 @@ private fun androidx.compose.foundation.layout.RowScope.Cell(text: String, weigh
 /** Time per 1% step, or grouped per 5% with a running total ("Combined"). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun StepTable(s: Session, steps: List<Step>) {
+private fun StepTable(s: Session, steps: List<Step>, note: String?) {
     val ctx = LocalContext.current
+    val charge = s.type == TYPE_CHARGE
     var combined by rememberSaveable { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         SectionTitle("Steps", Modifier.weight(1f))
@@ -288,6 +330,7 @@ private fun StepTable(s: Session, steps: List<Step>) {
             SegmentedButton(combined, { combined = true }, SegmentedButtonDefaults.itemShape(1, 2)) { Text("Combined") }
         }
     }
+    note?.let { Hint(it) }
     if (steps.isEmpty()) {
         Hint("No 1% change yet.")
         return
@@ -296,35 +339,38 @@ private fun StepTable(s: Session, steps: List<Step>) {
         Column(Modifier.padding(12.dp)) {
             Row {
                 Cell("Level", 1f, header = true)
-                Cell("Took", 1f, header = true)
-                Cell(if (combined) "Total" else if (s.type == TYPE_CHARGE) "At" else "Main app", 1.3f, header = true)
+                Cell("Took", 0.9f, header = true)
+                if (combined) Cell("Total", 0.9f, header = true)
+                Cell("At", 0.7f, header = true)
+                if (!combined && !charge) Cell("Main app", 1.3f, header = true)
             }
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
             if (!combined) {
-                var prev = s.startPct
                 steps.forEach { st ->
+                    val prev = if (charge) st.pct - 1 else st.pct + 1
                     Row(Modifier.padding(vertical = 3.dp)) {
                         Cell("$prev→${st.pct}%", 1f)
-                        Cell(fmtDuration(st.windowMs), 1f)
-                        Cell(if (s.type == TYPE_CHARGE) fmtTime(st.ts) else st.topApp?.let { UsageHelper.label(ctx, it) } ?: "–", 1.3f)
+                        Cell(fmtDuration(st.windowMs), 0.9f)
+                        Cell(fmtTime(st.ts), 0.7f)
+                        if (!charge) Cell(st.topApp?.let { UsageHelper.label(ctx, it) } ?: "–", 1.3f)
                     }
-                    prev = st.pct
                 }
             } else {
                 var total = 0L
-                steps.chunked(5).forEachIndexed { i, chunk ->
-                    val from = if (i == 0) s.startPct else steps[i * 5 - 1].pct
+                steps.chunked(5).forEach { chunk ->
+                    val from = if (charge) chunk.first().pct - 1 else chunk.first().pct + 1
                     val took = chunk.sumOf { it.windowMs }
                     total += took
                     Row(Modifier.padding(vertical = 3.dp)) {
                         Cell("$from→${chunk.last().pct}%", 1f)
-                        Cell(fmtDuration(took), 1f)
-                        Cell(fmtDuration(total), 1.3f)
+                        Cell(fmtDuration(took), 0.9f)
+                        Cell(fmtDuration(total), 0.9f)
+                        Cell(fmtTime(chunk.last().ts), 0.7f)
                     }
                 }
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
                 Text(
-                    "${s.startPct}% → ${steps.last().pct}% took ${fmtDuration(total)} in total",
+                    "${steps.size}% in ${fmtDuration(total)} total",
                     style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold,
                 )
             }

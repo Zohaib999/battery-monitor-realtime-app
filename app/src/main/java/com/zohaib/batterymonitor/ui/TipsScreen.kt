@@ -81,7 +81,7 @@ fun liveTips(context: Context, drain: List<AppDrain>, level: Int?): List<Tip> {
         "Battery saver", Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS),
     )
     val total = drain.sumOf { it.pct }
-    drain.firstOrNull { it.pkg != PKG_SCREEN_OFF && total > 0 && it.pct / total > 0.25 && it.pct >= 3 }?.let {
+    drain.firstOrNull { it.pkg != PKG_SCREEN_OFF && it.pkg != com.zohaib.batterymonitor.data.PKG_SCREEN_ON_OTHER && total > 0 && it.pct / total > 0.25 && it.pct >= 3 }?.let {
         val name = UsageHelper.label(context, it.pkg)
         tips += Tip(
             "$name used %.0f%% of battery today".format(it.pct),

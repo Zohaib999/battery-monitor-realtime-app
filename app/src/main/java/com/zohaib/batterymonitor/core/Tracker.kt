@@ -5,6 +5,7 @@ import com.zohaib.batterymonitor.Prefs
 import com.zohaib.batterymonitor.data.BatteryDao
 import com.zohaib.batterymonitor.data.Estimate
 import com.zohaib.batterymonitor.data.PKG_SCREEN_OFF
+import com.zohaib.batterymonitor.data.PKG_SCREEN_ON_OTHER
 import com.zohaib.batterymonitor.data.Session
 import com.zohaib.batterymonitor.data.Step
 import com.zohaib.batterymonitor.data.StepApp
@@ -116,19 +117,23 @@ class Tracker(
         val each = window / count
         val apps: Map<String, Long> =
             if (s.type == TYPE_DISCHARGE) UsageHelper.foregroundTimes(context, lastStepTs, now) else emptyMap()
-        val screenOff = (window - apps.values.sum()).coerceAtLeast(0)
+        val fg = apps.values.sum().coerceAtMost(window)
+        val screenOn = if (s.type == TYPE_DISCHARGE) {
+            (UsageHelper.screenOnTime(context, lastStepTs, now) ?: fg).coerceIn(fg, window)
+        } else 0L
+        val onOther = screenOn - fg
+        val screenOff = window - screenOn
+        val all = apps + mapOf(PKG_SCREEN_ON_OTHER to onOther, PKG_SCREEN_OFF to screenOff).filterValues { it > 0 }
         val dir = if (to > from) 1 else -1
         for (k in 1..count) {
             val pct = from + dir * k
             val ts = lastStepTs + each * k
-            val top = apps.maxByOrNull { it.value }?.takeIf { it.value > screenOff }?.key
-                ?: if (s.type == TYPE_DISCHARGE) PKG_SCREEN_OFF else null
+            val top = all.maxByOrNull { it.value }?.key
             val step = Step(sessionId = s.id, pct = pct, ts = ts, windowMs = each, topApp = top)
             val id = dao.insert(step)
             steps.add(step.copy(id = id))
             if (s.type == TYPE_DISCHARGE) {
-                val rows = apps.map { StepApp(stepId = id, pkg = it.key, ms = it.value / count) } +
-                    listOfNotNull(if (screenOff > 0) StepApp(stepId = id, pkg = PKG_SCREEN_OFF, ms = screenOff / count) else null)
+                val rows = all.map { StepApp(stepId = id, pkg = it.key, ms = it.value / count) }
                 if (rows.isNotEmpty()) dao.insertApps(rows)
             }
         }
