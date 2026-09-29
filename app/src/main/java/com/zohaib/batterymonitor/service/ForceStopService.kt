@@ -79,6 +79,11 @@ class ForceStopService : AccessibilityService() {
         // Only confirm a dialog that is about stopping. Anything mentioning uninstall/disable is cancelled.
         var unsafe = false
         val ok = waitFor(3_000) { root ->
+            // Wait for the popup itself (it has dialog buttons); ignore the App info page behind it,
+            // which always shows an "Uninstall" button.
+            val isDialog = root.findAccessibilityNodeInfosByViewId("android:id/button1").isNotEmpty() ||
+                root.findAccessibilityNodeInfosByViewId("android:id/button2").isNotEmpty()
+            if (!isDialog || findStopButton(root) != null) return@waitFor null
             val text = allText(root)
             when {
                 UNSAFE_WORDS.any { text.contains(it) } -> { unsafe = true; root }
