@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Battery Monitor</string>
+    <string name="accessibility_label">Battery Monitor – Force stop helper</string>
+    <string name="accessibility_desc">Used only when you press "Kill selected". It opens each selected app\'s info page and taps Force stop for you. It reads nothing else.</string>
+</resources>
