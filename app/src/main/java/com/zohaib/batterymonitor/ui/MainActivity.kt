@@ -19,10 +19,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -43,8 +43,7 @@ class MainActivity : ComponentActivity() {
             notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
         MonitorService.start(this)
-        val start = if (App.instance.prefs.onboarded) "home" else "onboarding"
-        setContent { BatteryTheme { AppNav(start) } }
+        setContent { BatteryTheme { AppNav(showOnboarding = !App.instance.prefs.onboarded) } }
     }
 }
 
@@ -58,8 +57,10 @@ private val tabs = listOf(
 )
 
 @Composable
-fun AppNav(start: String) {
+fun AppNav(showOnboarding: Boolean) {
     val nav = rememberNavController()
+    // Home is always the root, so Back from any tab returns to Home and then exits.
+    LaunchedEffect(Unit) { if (showOnboarding) nav.navigate("onboarding") }
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val showBar = tabs.any { it.route == route }
@@ -74,7 +75,7 @@ fun AppNav(start: String) {
                             selected = route == t.route,
                             onClick = {
                                 nav.navigate(t.route) {
-                                    popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                                    popUpTo("home") { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
                                 }
@@ -87,17 +88,17 @@ fun AppNav(start: String) {
             }
         },
     ) { pad ->
-        NavHost(nav, startDestination = start, modifier = Modifier.padding(bottom = pad.calculateBottomPadding())) {
+        NavHost(nav, startDestination = "home", modifier = Modifier.padding(bottom = pad.calculateBottomPadding())) {
             composable("onboarding") {
                 OnboardingScreen(onDone = {
                     App.instance.prefs.onboarded = true
-                    nav.navigate("home") { popUpTo("onboarding") { inclusive = true } }
+                    nav.popBackStack()
                 })
             }
             composable("home") {
                 HomeScreen(
                     onOpenSessions = { type -> nav.navigate("sessions/$type") },
-                    onOpenApps = { nav.navigate("apps") { launchSingleTop = true } },
+                    onOpenApps = { nav.navigate("apps") { popUpTo("home") { saveState = true }; launchSingleTop = true; restoreState = true } },
                     onOpenSettings = { nav.navigate("settings") },
                 )
             }

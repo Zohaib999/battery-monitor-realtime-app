@@ -69,40 +69,75 @@ class ForceStopService : AccessibilityService() {
             performGlobalAction(GLOBAL_ACTION_BACK)
             return Result.FAILED
         }
-        if (!button.isEnabled) {
+        val target = clickable(button)
+        if (target == null || !target.isEnabled || !button.isEnabled) {
             performGlobalAction(GLOBAL_ACTION_BACK)
             return Result.ALREADY_STOPPED
         }
-        click(button)
+        target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+
+        // Only confirm a dialog that is about stopping. Anything mentioning uninstall/disable is cancelled.
+        var unsafe = false
         val ok = waitFor(3_000) { root ->
-            root.findAccessibilityNodeInfosByViewId("android:id/button1").firstOrNull()
-                ?: findByText(root, CONFIRM_TEXTS)?.takeIf { it.className?.contains("Button") == true }
+            val text = allText(root)
+            when {
+                UNSAFE_WORDS.any { text.contains(it) } -> { unsafe = true; root }
+                text.contains("stop") -> confirmButton(root)
+                else -> null
+            }
         }
-        val result = if (ok != null && click(ok)) Result.STOPPED else Result.FAILED
+        val result = when {
+            unsafe -> {
+                rootInActiveWindow?.findAccessibilityNodeInfosByViewId("android:id/button2")?.firstOrNull()
+                    ?.let { clickable(it)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) }
+                    ?: performGlobalAction(GLOBAL_ACTION_BACK)
+                delay(300)
+                Result.FAILED
+            }
+            ok != null && clickable(ok)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true -> Result.STOPPED
+            else -> Result.FAILED
+        }
         delay(400)
         performGlobalAction(GLOBAL_ACTION_BACK)
         delay(300)
         return result
     }
 
-    private fun findStopButton(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        for (id in STOP_IDS) root.findAccessibilityNodeInfosByViewId(id).firstOrNull()?.let { return it }
-        return findByText(root, STOP_TEXTS)
-    }
-
-    private fun findByText(root: AccessibilityNodeInfo, texts: List<String>): AccessibilityNodeInfo? {
-        for (t in texts) {
-            root.findAccessibilityNodeInfosByText(t)
-                .firstOrNull { it.text?.toString()?.trim().equals(t, ignoreCase = true) }
-                ?.let { return it }
+    /** The "Force stop" button, found only by its text so we can never hit Uninstall or Disable. */
+    private fun findStopButton(root: AccessibilityNodeInfo): AccessibilityNodeInfo? =
+        STOP_TEXTS.firstNotNullOfOrNull { t ->
+            root.findAccessibilityNodeInfosByText(t).firstOrNull { n ->
+                val label = (n.text ?: n.contentDescription)?.toString()?.trim()?.lowercase() ?: return@firstOrNull false
+                label == t.lowercase() && UNSAFE_WORDS.none { label.contains(it) }
+            }
         }
-        return null
+
+    private fun confirmButton(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        root.findAccessibilityNodeInfosByViewId("android:id/button1").firstOrNull()?.let { b ->
+            val label = b.text?.toString()?.lowercase() ?: ""
+            if (UNSAFE_WORDS.none { label.contains(it) }) return b
+        }
+        return CONFIRM_TEXTS.firstNotNullOfOrNull { t ->
+            root.findAccessibilityNodeInfosByText(t).firstOrNull { it.text?.toString()?.trim().equals(t, ignoreCase = true) }
+        }
     }
 
-    private fun click(node: AccessibilityNodeInfo): Boolean {
+    /** Lower-cased text of every node in the window. */
+    private fun allText(root: AccessibilityNodeInfo): String {
+        val sb = StringBuilder()
+        fun walk(n: AccessibilityNodeInfo?, depth: Int) {
+            if (n == null || depth > 30) return
+            n.text?.let { sb.append(it).append(' ') }
+            for (i in 0 until n.childCount) walk(n.getChild(i), depth + 1)
+        }
+        walk(root, 0)
+        return sb.toString().lowercase()
+    }
+
+    private fun clickable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
         var n: AccessibilityNodeInfo? = node
         while (n != null && !n.isClickable) n = n.parent
-        return n?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
+        return n
     }
 
     private suspend fun waitFor(timeoutMs: Long, find: (AccessibilityNodeInfo) -> AccessibilityNodeInfo?): AccessibilityNodeInfo? {
@@ -119,13 +154,9 @@ class ForceStopService : AccessibilityService() {
         var instance: ForceStopService? = null
             private set
 
-        private val STOP_IDS = listOf(
-            "com.android.settings:id/force_stop_button",
-            "com.android.settings:id/right_button",
-            "com.miui.securitycenter:id/force_stop",
-        )
-        private val STOP_TEXTS = listOf("Force stop", "Force Stop", "FORCE STOP", "Force close", "Stop")
-        private val CONFIRM_TEXTS = listOf("OK", "Force stop", "Stop")
+        private val STOP_TEXTS = listOf("Force stop", "Force close")
+        private val CONFIRM_TEXTS = listOf("OK", "Force stop", "Force close")
+        private val UNSAFE_WORDS = listOf("uninstall", "disable", "delete", "remove")
 
         fun isEnabled(context: Context): Boolean {
             val cn = ComponentName(context, ForceStopService::class.java)

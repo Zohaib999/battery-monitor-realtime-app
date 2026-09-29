@@ -168,3 +168,14 @@ iOS, alerts (F6), cloud sync, root features, a home-screen widget, CSV export.
   - **Kill selected** force-stops the ticked apps through an optional Accessibility helper, which taps Force stop on each app's info page. Without the helper, it falls back to a soft background kill.
   - The user always triggers this manually; nothing is killed automatically.
 - **First launch:** a permissions screen: usage access, notifications, unrestricted battery, and the Force stop helper.
+
+## Backlog (not started)
+
+### T1. Auto-kill watcher
+- The user picks a "watch list" of apps that start themselves in the background (auto-launch).
+- A watcher notices when a watched app starts running again and force-stops it automatically, with no button press.
+- Open questions:
+  - how to detect a relaunch (usage events or FLAG_STOPPED polling)
+  - how often to check (battery cost)
+  - skip the app while you are actively using it
+  - a notification or log of what was killed
