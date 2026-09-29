@@ -66,11 +66,11 @@ class Tracker(
     }
 
     /** Called every few seconds by the service: takes the 1-minute snapshot and refreshes the ETA. */
-    suspend fun tick() = mutex.withLock {
+    suspend fun tick(publish: Boolean = true) = mutex.withLock {
         val s = session ?: return@withLock
         val now = System.currentTimeMillis()
         lastBattery?.let { checkSnapshots(s, it.level, now) }
-        publish(now)
+        if (publish) publish(now)
         if (now - prefs.lastPurge > 86_400_000L) {
             val before = now - 90L * 86_400_000L
             dao.purgeStepApps(before)

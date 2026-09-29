@@ -8,7 +8,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.os.BatteryManager
 import android.os.Build
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -20,7 +22,7 @@ import com.zohaib.batterymonitor.core.BatteryReader
 import com.zohaib.batterymonitor.core.LiveStatus
 import com.zohaib.batterymonitor.data.TYPE_CHARGE
 import com.zohaib.batterymonitor.ui.MainActivity
-import com.zohaib.batterymonitor.ui.fmtDuration
+import com.zohaib.batterymonitor.ui.fmtMinutes
 import com.zohaib.batterymonitor.ui.fmtTime
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -30,9 +32,18 @@ class MonitorService : LifecycleService() {
 
     private val app get() = application as App
     private var lastText = ""
+    private var lastLevel = -1
+    private var lastPlugged = -1
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            // This broadcast fires on every small voltage/temperature change. Only a level or
+            // plug change matters for tracking, so everything else is dropped here cheaply.
+            val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val plugged = intent.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0)
+            if (level == lastLevel && plugged == lastPlugged) return
+            lastLevel = level
+            lastPlugged = plugged
             val snap = BatteryReader.read(context, intent) ?: return
             lifecycleScope.launch { app.tracker.onBattery(snap) }
         }
@@ -49,9 +60,10 @@ class MonitorService : LifecycleService() {
         registerReceiver(receiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
 
         lifecycleScope.launch {
+            val pm = getSystemService(PowerManager::class.java)
             while (true) {
-                app.tracker.tick()
-                delay(15_000)
+                app.tracker.tick(publish = pm.isInteractive)
+                delay(if (pm.isInteractive) 30_000 else 120_000)
             }
         }
         lifecycleScope.launch {
@@ -82,8 +94,8 @@ class MonitorService : LifecycleService() {
         val b = s.battery ?: return "Starting…"
         val charging = s.session?.type == TYPE_CHARGE
         val eta = s.remainingMs?.let {
-            if (charging) "full in ${fmtDuration(it)} (${fmtTime(s.etaAt!!)})"
-            else "~${fmtDuration(it)} left (${fmtTime(s.etaAt!!)})"
+            if (charging) "full in ${fmtMinutes(it)} (${fmtTime(s.etaAt!!)})"
+            else "~${fmtMinutes(it)} left (${fmtTime(s.etaAt!!)})"
         } ?: "measuring…"
         return "${b.level}% · ${if (charging) "Charging" else "On battery"} · $eta"
     }
@@ -104,6 +116,7 @@ class MonitorService : LifecycleService() {
         .build()
 
     private fun update(s: LiveStatus) {
+        if (!getSystemService(PowerManager::class.java).isInteractive) return
         val t = text(s)
         if (t == lastText) return
         lastText = t

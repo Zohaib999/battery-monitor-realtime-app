@@ -48,6 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.zohaib.batterymonitor.App
+import com.zohaib.batterymonitor.core.BatteryReader
 import com.zohaib.batterymonitor.core.LiveStatus
 import com.zohaib.batterymonitor.core.UsageHelper
 import com.zohaib.batterymonitor.data.PKG_SCREEN_OFF
@@ -75,6 +76,12 @@ fun HomeScreen(onOpenSessions: (String) -> Unit, onOpenApps: () -> Unit, onOpenS
         value = withContext(Dispatchers.IO) { UsageHelper.unusedApps(ctx) }
     }
     val charging = live.session?.type == TYPE_CHARGE
+    val now by produceState(live.battery, live.battery) {
+        while (true) {
+            value = BatteryReader.read(ctx) ?: live.battery
+            kotlinx.coroutines.delay(5_000)
+        }
+    }
 
     Column(
         Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
@@ -82,7 +89,7 @@ fun HomeScreen(onOpenSessions: (String) -> Unit, onOpenApps: () -> Unit, onOpenS
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Battery", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                live.battery?.let { b ->
+                now?.let { b ->
                     val extra = listOfNotNull(
                         b.plug.takeIf { it.isNotEmpty() },
                         b.currentMa?.let { "${if (it > 0) "+" else ""}$it mA" },

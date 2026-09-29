@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -115,8 +116,9 @@ fun CleanerScreen() {
                     Checkbox(checked, onCheckedChange = { setSelected(if (it) selected + a.pkg else selected - a.pkg) })
                     Spacer(Modifier.width(4.dp))
                     Column(Modifier.weight(1f)) {
-                        AppRow(a.pkg, a.label, "Last used ${fmtAgo(a.lastUsed)}", "", null)
+                        AppRow(a.pkg, a.label, "Last used ${fmtAgo(a.lastUsed)}", "", null, openInfo = false)
                     }
+                    IconButton(onClick = { Perms.openAppInfo(ctx, a.pkg) }) { Icon(Icons.Outlined.Info, "App info") }
                 }
             }
         }

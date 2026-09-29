@@ -9,6 +9,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -110,6 +111,12 @@ fun fmtDuration(ms: Long): String {
     }
 }
 
+/** Minute precision, so the notification changes at most once a minute. */
+fun fmtMinutes(ms: Long): String {
+    val m = ms / 60_000
+    return if (m >= 60) "${m / 60}h ${m % 60}m" else "${m}m"
+}
+
 fun fmtTime(ts: Long): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ts))
 
 fun fmtDay(ts: Long): String {
@@ -206,8 +213,14 @@ fun AppIcon(pkg: String, size: Int = 36) {
 
 /** Icon, name, a subtitle, a trailing value and an optional bar (0..1). */
 @Composable
-fun AppRow(pkg: String, title: String, subtitle: String, value: String, fraction: Float?, color: Color = MaterialTheme.colorScheme.primary) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+fun AppRow(
+    pkg: String, title: String, subtitle: String, value: String, fraction: Float?,
+    color: Color = MaterialTheme.colorScheme.primary,
+    openInfo: Boolean = true,
+) {
+    val ctx = LocalContext.current
+    val tap = if (openInfo && pkg != PKG_SCREEN_OFF) Modifier.clickable { Perms.openAppInfo(ctx, pkg) } else Modifier
+    Row(Modifier.fillMaxWidth().then(tap).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         AppIcon(pkg)
         Spacer(Modifier.width(12.dp))
         androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {

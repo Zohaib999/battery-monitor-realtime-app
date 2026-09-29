@@ -107,12 +107,10 @@ fun AppsScreen() {
         }
         item {
             SectionTitle("Unused for 7 days (${unused.size})")
-            Hint("Tap an app to open its info page, where you can uninstall it or set its battery use to Restricted.")
+            Hint("Tap any app to open its info page, where you can uninstall it or set its battery use to Restricted.")
         }
         items(unused, key = { "u" + it.pkg }) {
-            Column(Modifier.clickable { Perms.openAppInfo(ctx, it.pkg) }) {
-                AppRow(it.pkg, it.label, "Not opened in 7 days", "", null)
-            }
+            AppRow(it.pkg, it.label, "Not opened in 7 days", "", null)
         }
         item { Spacer(Modifier.height(24.dp)) }
     }
