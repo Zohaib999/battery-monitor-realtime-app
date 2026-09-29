@@ -83,7 +83,7 @@ class ForceStopService : AccessibilityService() {
             // which always shows an "Uninstall" button.
             val isDialog = root.findAccessibilityNodeInfosByViewId("android:id/button1").isNotEmpty() ||
                 root.findAccessibilityNodeInfosByViewId("android:id/button2").isNotEmpty()
-            if (!isDialog || findStopButton(root) != null) return@waitFor null
+            if (!isDialog) return@waitFor null
             val text = allText(root)
             when {
                 UNSAFE_WORDS.any { text.contains(it) } -> { unsafe = true; root }
