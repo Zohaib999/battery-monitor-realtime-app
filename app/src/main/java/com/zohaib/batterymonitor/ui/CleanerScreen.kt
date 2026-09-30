@@ -2,7 +2,6 @@ package com.zohaib.batterymonitor.ui
 
 import android.app.ActivityManager
 import android.content.Context
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,18 +15,25 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.RemoveCircleOutline
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -47,23 +53,30 @@ import com.zohaib.batterymonitor.service.ForceStopService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CleanerScreen() {
     val ctx = LocalContext.current
     val prefs = App.instance.prefs
     val resume = rememberResumeKey()
     var reload by remember { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    var showSystem by rememberSaveable { mutableStateOf(false) }
     val helperOn = remember(resume) { ForceStopService.isEnabled(ctx) }
-    val apps by produceState<List<InstalledApp>?>(null, resume, reload) {
-        value = withContext(Dispatchers.IO) { UsageHelper.stoppableApps(ctx) }
+    val apps by produceState<List<InstalledApp>?>(null, resume, reload, showSystem) {
+        value = withContext(Dispatchers.IO) { UsageHelper.stoppableApps(ctx, showSystem) }
     }
-    var selected by remember { mutableStateOf(prefs.killList) }
+    var myList by remember { mutableStateOf(prefs.killList) }
+    // Which apps in my list are running again (not force-stopped).
+    val listRunning by produceState(emptySet<String>(), myList, resume, reload) {
+        value = withContext(Dispatchers.IO) { myList.filterNot { UsageHelper.isStopped(ctx, it) }.toSet() }
+    }
     var running by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
 
-    fun setSelected(v: Set<String>) {
-        selected = v
-        prefs.killList = v // remembered for next time
+    fun setList(v: Set<String>) {
+        myList = v
+        prefs.killList = v
     }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -71,11 +84,6 @@ fun CleanerScreen() {
             Text("Cleaner", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             IconButton(onClick = { reload++ }) { Icon(Icons.Outlined.Refresh, "Refresh") }
         }
-        Text(
-            "Apps that can still run in the background. Tick the ones you want to stop, then press Kill. Force-stopped apps stay stopped until you open them again.",
-            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
 
         if (!helperOn) {
             Card(
@@ -95,30 +103,54 @@ fun CleanerScreen() {
         }
 
         val list = apps
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (list == null) "Loading…" else "${list.size} apps can run · ${selected.count { s -> list.any { it.pkg == s } }} selected",
-                style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f).padding(start = 8.dp),
-            )
-            TextButton(onClick = { setSelected(list?.map { it.pkg }?.toSet() ?: emptySet()) }) { Text("All") }
-            TextButton(onClick = { setSelected(emptySet()) }) { Text("None") }
+        val tabs = listOf("Running (${list?.size ?: "…"})", "My list (${myList.size})")
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            tabs.forEachIndexed { i, label ->
+                SegmentedButton(tab == i, { tab = i }, SegmentedButtonDefaults.itemShape(i, tabs.size)) { Text(label) }
+            }
         }
 
-        LazyColumn(Modifier.weight(1f).padding(horizontal = 8.dp)) {
-            items(list ?: emptyList(), key = { it.pkg }) { a ->
-                val checked = a.pkg in selected
-                Row(
-                    Modifier.fillMaxWidth()
-                        .clickable { setSelected(if (checked) selected - a.pkg else selected + a.pkg) }
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Checkbox(checked, onCheckedChange = { setSelected(if (it) selected + a.pkg else selected - a.pkg) })
-                    Spacer(Modifier.width(4.dp))
-                    Column(Modifier.weight(1f)) {
-                        AppRow(a.pkg, a.label, "Last used ${fmtAgo(a.lastUsed)}", "", null, openInfo = false)
+        if (tab == 0) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Apps running or able to wake up. Tap + to add one to your list.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("System", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 6.dp))
+                Switch(showSystem, { showSystem = it })
+            }
+            if (showSystem) Text(
+                "System apps are shown after your apps. Core parts (phone, SystemUI, Play services, launcher, keyboard) are hidden. Some system apps start again by themselves, and some don't allow Force stop.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+            LazyColumn(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+                if (list == null) item { Text("Loading…", Modifier.padding(16.dp)) }
+                items(list ?: emptyList(), key = { it.pkg }) { a ->
+                    val inList = a.pkg in myList
+                    AppLine(a.pkg, a.label, runningNote(a)) {
+                        IconButton(onClick = { setList(if (inList) myList - a.pkg else myList + a.pkg) }) {
+                            if (inList) Icon(Icons.Outlined.Check, "In my list", tint = MaterialTheme.colorScheme.primary)
+                            else Icon(Icons.Outlined.Add, "Add to my list")
+                        }
                     }
-                    IconButton(onClick = { Perms.openAppInfo(ctx, a.pkg) }) { Icon(Icons.Outlined.Info, "App info") }
+                }
+            }
+        } else {
+            Text(
+                if (myList.isEmpty()) "Your list is empty. Add apps with + on the Running tab."
+                else "${listRunning.size} of ${myList.size} are running again. Kill stops them all in one tap.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            val sorted = myList.sortedWith(compareBy<String> { it !in listRunning }.thenBy { UsageHelper.label(ctx, it).lowercase() })
+            LazyColumn(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+                items(sorted, key = { it }) { pkg ->
+                    val on = pkg in listRunning
+                    AppLine(pkg, UsageHelper.label(ctx, pkg), if (on) "● Running again" else "Stopped") {
+                        IconButton(onClick = { setList(myList - pkg) }) { Icon(Icons.Outlined.RemoveCircleOutline, "Remove from list") }
+                    }
                 }
             }
         }
@@ -126,7 +158,7 @@ fun CleanerScreen() {
         message?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         }
-        val toKill = list?.map { it.pkg }?.filter { it in selected } ?: emptyList()
+        val toKill = myList.filter { it in listRunning }
         Button(
             onClick = {
                 message = null
@@ -158,9 +190,29 @@ fun CleanerScreen() {
                 CircularProgressIndicator(Modifier.padding(end = 8.dp).height(20.dp).width(20.dp), strokeWidth = 2.dp)
                 Text(running!!)
             } else {
-                Text("Kill selected (${toKill.size})")
+                Text(if (toKill.isEmpty()) "My list: nothing running" else "Kill my list (${toKill.size})")
             }
         }
+    }
+}
+
+/** Marks apps that are running although you haven't opened them recently, i.e. they started by themselves. */
+private fun runningNote(a: InstalledApp): String {
+    val tag = if (a.system) "System · " else ""
+    return when {
+        a.lastUsed == 0L -> tag + "Started by itself · not opened in 7 days"
+        System.currentTimeMillis() - a.lastUsed > 3_600_000 -> tag + "Started by itself? Last opened ${fmtAgo(a.lastUsed)}"
+        else -> tag + "Opened ${fmtAgo(a.lastUsed)}"
+    }
+}
+
+@Composable
+private fun AppLine(pkg: String, label: String, note: String, action: @Composable () -> Unit) {
+    val ctx = LocalContext.current
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) { AppRow(pkg, label, note, "", null, openInfo = false) }
+        IconButton(onClick = { Perms.openAppInfo(ctx, pkg) }) { Icon(Icons.Outlined.Info, "App info") }
+        action()
     }
 }
 

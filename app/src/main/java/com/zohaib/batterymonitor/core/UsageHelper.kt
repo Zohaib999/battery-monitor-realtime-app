@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 data class AppTime(val pkg: String, val ms: Long, val lastUsed: Long)
 
-data class InstalledApp(val pkg: String, val label: String, val lastUsed: Long)
+data class InstalledApp(val pkg: String, val label: String, val lastUsed: Long, val system: Boolean = false)
 
 object UsageHelper {
 
@@ -134,22 +134,54 @@ object UsageHelper {
             .sortedBy { it.label.lowercase() }
     }
 
+    /** Core packages that must never be stopped, or the phone stops working properly. */
+    private val PROTECTED = setOf(
+        "android", "com.android.systemui", "com.android.phone", "com.android.settings",
+        "com.android.providers.telephony", "com.android.bluetooth", "com.android.nfc",
+        "com.google.android.gms", "com.google.android.gsf", "com.android.vending",
+        "com.google.android.inputmethod.latin", "com.android.shell",
+    )
+
+    private fun homeAndKeyboard(context: Context): Set<String> {
+        val pm = context.packageManager
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val out = pm.queryIntentActivities(home, 0).map { it.activityInfo.packageName }.toMutableSet()
+        android.provider.Settings.Secure.getString(context.contentResolver, "default_input_method")
+            ?.substringBefore('/')?.let { out += it }
+        return out
+    }
+
     /**
-     * User-installed apps that are not in the force-stopped state, i.e. apps that can run in
-     * the background. Most recently used first.
+     * Apps that are not in the force-stopped state, i.e. apps that are running or can wake up in
+     * the background. With [includeSystem], safe-to-stop system apps are listed too.
+     * Most recently used first.
      */
-    fun stoppableApps(context: Context): List<InstalledApp> {
+    fun stoppableApps(context: Context, includeSystem: Boolean = false): List<InstalledApp> {
         val pm = context.packageManager
         val lastUsed = if (hasUsageAccess(context)) {
             screenTime(context, System.currentTimeMillis() - 7 * 86_400_000L).associate { it.pkg to it.lastUsed }
         } else emptyMap()
+        val skip = PROTECTED + homeAndKeyboard(context) + context.packageName
         @Suppress("DEPRECATION")
-        return pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { it.flags and ApplicationInfo.FLAG_SYSTEM == 0 }
+        return pm.getInstalledApplications(0)
             .filter { it.flags and ApplicationInfo.FLAG_STOPPED == 0 }
-            .filter { it.packageName != context.packageName }
-            .map { InstalledApp(it.packageName, pm.getApplicationLabel(it).toString(), lastUsed[it.packageName] ?: 0) }
-            .sortedWith(compareByDescending<InstalledApp> { it.lastUsed }.thenBy { it.label.lowercase() })
+            .filter { it.flags and ApplicationInfo.FLAG_PERSISTENT == 0 }
+            .filter { it.packageName !in skip }
+            .filter { includeSystem || it.flags and ApplicationInfo.FLAG_SYSTEM == 0 }
+            .map {
+                InstalledApp(
+                    it.packageName, pm.getApplicationLabel(it).toString(), lastUsed[it.packageName] ?: 0,
+                    it.flags and ApplicationInfo.FLAG_SYSTEM != 0,
+                )
+            }
+            .sortedWith(compareBy<InstalledApp> { it.system }.thenByDescending { it.lastUsed }.thenBy { it.label.lowercase() })
+    }
+
+    /** True when the app is force-stopped (or not installed), so it can't run until opened. */
+    fun isStopped(context: Context, pkg: String): Boolean = try {
+        context.packageManager.getApplicationInfo(pkg, 0).flags and ApplicationInfo.FLAG_STOPPED != 0
+    } catch (_: PackageManager.NameNotFoundException) {
+        true
     }
 
     private val labels = ConcurrentHashMap<String, String>()
